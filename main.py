@@ -3,6 +3,7 @@ Created on Jan 27, 2018
 
 @author: Yishan McNabb
 """
+
 import prompt
 import goody
 import file
@@ -13,6 +14,7 @@ import sys
 
 num_rounds = 0
 dropped_players = []
+
 
 def check_if_played_before(player1, player2):
     for opponent in player1.get_opponents():
@@ -72,33 +74,30 @@ def pair_round(players):
         if loss < 99999:
             return players_to_seats(players)
 
-    #otherwise we search for an optimal seat pairing through brute force
-    #looking to change this into something more elegant but it's the
-    #best i've got for now...
+    # otherwise we search for an optimal seat pairing through brute force
+    # looking to change this into a dynamic programming solution
     min_updated = True
-    iteration = 0
     while min_updated:
-        min_updated=False
+        min_updated = False
         for i in range(len(players) * 100 * (2**iteration)):
             random.shuffle(players)
             loss = loss_fn(players)
             if loss < min:
-                print('found new minimum at iteration', iteration)
+                print("found new minimum at iteration", iteration)
                 min = loss
                 players_copy = list(players)
-                #once you find a minimum the next one will be harder to find
-                #if it exists so we increase the amount we search for
+                # once you find a minimum the next one will be harder to find
+                # if it exists so we increase the amount we search for
                 iteration += 1
                 min_updated = True
                 break
 
     if min == 99999:
-        #if something goes wrong here it means everyone
-        #has already played everyone else, which is very
-        #very worrisome
+        # if something goes wrong here it means everyone
+        # has already played everyone else, which is very
+        # very worrisome
         assert False
 
-    print("The minimum was:", min)
     return sort_seats(players_to_seats(players_copy))
 
 
@@ -152,7 +151,7 @@ def calculate_num_rounds(players):
     global num_rounds
     ppl = len(players)
     num_rounds = 0
-    while 2 ** num_rounds < ppl:
+    while 2**num_rounds < ppl:
         num_rounds += 1
 
 
@@ -175,9 +174,13 @@ def end_of_round_cleanup(players):
             print_standings(players)
         elif dropping == "a":
             new_player = Player.Player(input("Enter the name of the new player: "))
-            num_byes = prompt.for_int("Enter the number of byes this player has (if any). For example if this player is entering with a round 1 loss, enter 0. If this player is entering round 2 with a 1-0 record enter 1", is_legal=lambda x : x < num_rounds, error_message='A player should not have more byes than the total number of rounds.')
+            num_byes = prompt.for_int(
+                "Enter the number of byes this player has (if any). For example if this player is entering with a round 1 loss, enter 0. If this player is entering round 2 with a 1-0 record enter 1",
+                is_legal=lambda x: x < num_rounds,
+                error_message="A player should not have more byes than the total number of rounds.",
+            )
             for i in range(num_byes):
-                new_player.wins.append('BYE') 
+                new_player.wins.append("BYE")
             players.append(new_player)
 
         else:
@@ -185,9 +188,9 @@ def end_of_round_cleanup(players):
                 if dropping == players[i].name:
                     print(players[i].name, "has been dropped.")
                     global dropped_players
-                    #add the '#' character to signify that the player has been dropped 
-                    #for run_from_file purposes
-                    players[i].name = '#' + players[i].name
+                    # add the '#' character to signify that the player has been dropped
+                    # for run_from_file purposes
+                    players[i].name = "#" + players[i].name
                     dropped_players.append(players[i])
                     del players[i]
                     break
@@ -197,40 +200,59 @@ def end_of_round_cleanup(players):
 
 def get_results(pairs, players):
     still_playing = set(range(1, len(pairs) + 1))
-    while len(still_playing) > 0:
+    all_tables = set(range(1, len(pairs) + 1))
+    user_confirmation = True
+    done = {}
+    while len(still_playing) > 0 or user_confirmation:
         print("Waiting for results from tables", still_playing)
+        print("-------------------------------")
+        print("Finished Results:")
+        print(done)
         table = prompt.for_int(
-            "Enter a table number to report results",
-            is_legal=lambda x: x in still_playing,
-            error_message="Enter a table that has not finished their match.",
+            "Enter a table number to report new results or edit previous results",
+            is_legal=lambda x: x in all_tables,
+            error_message="Enter a table valid table number.",
         )
-        table -= 1
+
+        # If the match is already reported then undo the previous result
+        player0 = pairs[table - 1][0]
+        player1 = pairs[table - 1][1]
+        if table not in still_playing:
+            player0.undo_recent_result()
+            player1.undo_recent_result()
+
         winner = prompt.for_string(
             "Enter a winner ("
-            + str(pairs[table][0].name)
+            + str(player0.name)
             + ") or ("
-            + str(pairs[table][1].name)
+            + str(player1.name)
             + ") or (tie)",
-            is_legal=(
-                lambda x: x == pairs[table][0].name
-                or x == pairs[table][1].name
-                or x == "tie"
-            ),
+            is_legal=(lambda x: x == player0.name or x == player1.name or x == "tie"),
             error_message="please enter the winner's full name or tie",
         )
-        if winner == "tie":
-            pairs[table][0].ties.append(pairs[table][1])
-            pairs[table][1].ties.append(pairs[table][0])
-        else:
-            if winner == pairs[table][0].name:
-                pairs[table][0].wins.append(pairs[table][1])
-                pairs[table][1].losses.append(pairs[table][0])
-            else:
-                pairs[table][1].wins.append(pairs[table][0])
-                pairs[table][0].losses.append(pairs[table][1])
 
-        still_playing.remove(table + 1)
-        print()
+        if winner == "tie":
+            player0.add_tie(player1)
+            player1.add_tie(player0)
+        else:
+            if winner == player0.name:
+                player0.add_win(player1)
+                player1.add_loss(player0)
+            else:
+                player1.add_win(player0)
+                player0.add_loss(player1)
+        if table in still_playing:
+            still_playing.remove(table)
+        done[table] = winner
+        if len(still_playing) == 0:
+            go_to_next_round = prompt.for_string(
+                "Continue to end of round cleanup where you "
+                "can add or drop players and pair the next round? "
+                "\nEnter (y)es or (n)o if you want to edit the results",
+                is_legal=lambda x: x == "y" or x == "n",
+                error_message="please enter (y) or (n)",
+            )
+            user_confirmation = go_to_next_round == "n"
 
 
 def calculate_standings(players):
@@ -322,6 +344,8 @@ def run_tournament(players, roundNumber, pairs=None):
         )
 
     calculate_standings(players)
+    print("Standings after the final round!")
+    print("--------------------------------")
     print_standings(players)
 
 
@@ -379,13 +403,16 @@ def run_from_file(filename):
     del playerdict["BYE"]
     players = list(playerdict.values())
 
-    #separate dropped players from remaining players by looking for '#' character
+    # separate dropped players from remaining players by looking for '#' character
     global dropped_players
-    for i in range(len(players)):
-        if players[i].name[0] == '#':
+    for p in players:
+        print(p.name)
+    # loop backwards so that if you delete something the list can still be iterated
+    for i in range(len(players) - 1, -1, -1):
+        if players[i].name[0] == "#":
             dropped_players.append(players[i])
             del players[i]
-            
+
     savefile.close()
     run_tournament(players, round_num, pairs)
 
@@ -430,10 +457,11 @@ def append_pairings_to_file(filename, pairs):
 def print_welcome_screen():
     print("Welcome to Yishan's Tournament Software!\n")
     print("---------------How To Use---------------\n")
-    print("1. Press s or n to either load a saved tournament or start a new one.")
-    print("2. Find the PutYourTournamentParticipantsHere.txt file and enter participans on separate lines.")
     print(
-        "3. Follow on screen prompts to run tournament, all command available are enclosed in ().\n"
+        "1. Find the PutYourTournamentParticipantsHere.txt file and enter participans on separate lines."
+    )
+    print(
+        "2. Follow on screen prompts to run tournament, all commands available are enclosed in ().\n"
     )
 
 
@@ -483,8 +511,7 @@ def main():
                 run_tournament(players, 1)
                 break
             else:
-                sys.exit("Ok, no rush! Restart the program when you're ready!") 
-
+                sys.exit("Ok, no rush! Restart the program when you're ready!")
 
 
 if __name__ == "__main__":
